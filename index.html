@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Acabados Yucatán — Ingeniería en Directo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/estilo.css">
+<style>
+  body { min-height: 100vh; }
+  .login { display: grid; grid-template-columns: 1fr 1fr; min-height: 100vh; }
+
+  .login-marca {
+    background: var(--concreto-osc);
+    color: var(--texto-inv);
+    display: flex; flex-direction: column; justify-content: space-between;
+    padding: 48px;
+    position: relative;
+    overflow: hidden;
+  }
+  .login-marca .plano {
+    position: absolute; inset: 0; opacity: 0.5;
+  }
+  .login-marca .encabezado, .login-marca .pie { position: relative; z-index: 1; }
+  .login-marca .n1 { font-size: 15px; font-weight: 700; letter-spacing: 0.02em; }
+  .login-marca .n2 { font-size: 12px; color: #A6A199; font-family: var(--fuente-mono); margin-top: 3px; }
+
+  .login-marca .lema {
+    position: relative; z-index: 1;
+    font-size: 34px; font-weight: 600; line-height: 1.25; max-width: 420px;
+  }
+  .login-marca .lema .medida {
+    font-family: var(--fuente-mono); font-size: 14px; color: var(--acero);
+    display: block; margin-top: 14px; font-weight: 500;
+  }
+
+  .login-marca .pie { font-size: 12px; color: #8B857C; }
+
+  .login-form-wrap {
+    display: flex; align-items: center; justify-content: center;
+    padding: 40px;
+  }
+  .login-form {
+    width: 100%; max-width: 360px;
+  }
+  .login-form h2 { font-size: 22px; margin-bottom: 4px; }
+  .login-form .sub { color: var(--texto-suave); font-size: 14px; margin-bottom: 26px; }
+
+  .campo-password { position: relative; }
+  .campo-password button {
+    position: absolute; right: 10px; top: 34px;
+    background: none; border: none; color: var(--texto-suave); font-size: 12px;
+    font-weight: 600; padding: 4px 6px;
+  }
+  .campo-password button:hover { color: var(--acero-osc); }
+
+  #login-error { margin-bottom: 16px; }
+
+  @media (max-width: 780px) {
+    .login { grid-template-columns: 1fr; }
+    .login-marca { min-height: 220px; padding: 28px; }
+    .login-marca .lema { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="login">
+  <div class="login-marca">
+    <svg class="plano" viewBox="0 0 500 700" preserveAspectRatio="none">
+      <defs>
+        <pattern id="cuad" width="28" height="28" patternUnits="userSpaceOnUse">
+          <path d="M0 0H28V28" fill="none" stroke="#3A3733" stroke-width="1"/>
+        </pattern>
+      </defs>
+      <rect width="500" height="700" fill="url(#cuad)"/>
+      <!-- Líneas de medición, como un plano acotado -->
+      <g stroke="#2B6E77" stroke-width="1.4" fill="none" opacity="0.85">
+        <line x1="60" y1="120" x2="60" y2="480"/>
+        <line x1="50" y1="120" x2="70" y2="120"/>
+        <line x1="50" y1="480" x2="70" y2="480"/>
+        <line x1="60" y1="120" x2="340" y2="60"/>
+        <line x1="60" y1="480" x2="420" y2="560"/>
+      </g>
+      <circle cx="340" cy="60" r="3.5" fill="#C1591F"/>
+      <circle cx="420" cy="560" r="3.5" fill="#C1591F"/>
+      <circle cx="60" cy="300" r="3.5" fill="#C1591F"/>
+    </svg>
+    <div class="encabezado">
+      <div class="n1">ACABADOS YUCATÁN</div>
+      <div class="n2">INGENIERÍA EN DIRECTO</div>
+    </div>
+    <div class="lema">
+      Materiales, inventario y ventas en un solo lugar.
+      <span class="medida">CATÁLOGO · INVENTARIO · COTIZACIONES · CORTE DE CAJA</span>
+    </div>
+    <div class="pie">Sistema interno · uso exclusivo del personal autorizado</div>
+  </div>
+
+  <div class="login-form-wrap">
+    <form class="login-form" id="form-login" novalidate>
+      <h2>Iniciar sesión</h2>
+      <p class="sub">Ingresa con tu usuario y contraseña.</p>
+
+      <div id="login-error" class="aviso error oculto">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 9v4"/><circle cx="12" cy="16" r="0.6" fill="currentColor"/><path d="M10.3 3.9 2.6 17.5A1 1 0 0 0 3.4 19h17.2a1 1 0 0 0 .9-1.5L13.7 3.9a1 1 0 0 0-1.7 0z"/></svg>
+        <span id="login-error-texto"></span>
+      </div>
+
+      <div class="campo mt-16">
+        <label for="usuario">Usuario</label>
+        <input type="text" id="usuario" name="usuario" autocomplete="username" autocapitalize="characters" required>
+      </div>
+
+      <div class="campo campo-password mt-16">
+        <label for="password">Contraseña</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+        <button type="button" id="btn-ver-pass">MOSTRAR</button>
+      </div>
+
+      <button type="submit" class="btn btn-primario btn-grande mt-24" id="btn-entrar">Entrar</button>
+    </form>
+  </div>
+</div>
+
+<script src="js/api.js"></script>
+<script>
+  // Si ya hay una sesión con token vigente, no tiene sentido ver el login.
+  if (API.haySesion()) {
+    window.location.href = 'dashboard.html';
+  }
+
+  const form = document.getElementById('form-login');
+  const btnEntrar = document.getElementById('btn-entrar');
+  const cajaError = document.getElementById('login-error');
+  const textoError = document.getElementById('login-error-texto');
+
+  document.getElementById('btn-ver-pass').addEventListener('click', (e) => {
+    const campo = document.getElementById('password');
+    const mostrar = campo.type === 'password';
+    campo.type = mostrar ? 'text' : 'password';
+    e.currentTarget.textContent = mostrar ? 'OCULTAR' : 'MOSTRAR';
+  });
+
+  function mostrarError(msg) {
+    textoError.textContent = msg;
+    cajaError.classList.remove('oculto');
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    cajaError.classList.add('oculto');
+
+    const usuario = document.getElementById('usuario').value.trim();
+    const password = document.getElementById('password').value;
+    if (!usuario || !password) { mostrarError('Escribe tu usuario y tu contraseña.'); return; }
+
+    btnEntrar.disabled = true;
+    btnEntrar.textContent = 'Entrando...';
+
+    try {
+      await API.login(usuario, password);
+      window.location.href = 'dashboard.html';
+    } catch (err) {
+      mostrarError(err.message || 'No se pudo iniciar sesión.');
+      btnEntrar.disabled = false;
+      btnEntrar.textContent = 'Entrar';
+    }
+  });
+</script>
+</body>
+</html>

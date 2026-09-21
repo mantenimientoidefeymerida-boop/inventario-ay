@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catálogo — Acabados Yucatán</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/estilo.css">
+<style>
+  .encabezado-tab { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+  .form-linea { display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: flex-end; margin-bottom: 18px; }
+  td.chico { width: 90px; }
+</style>
+</head>
+<body>
+
+<div id="app-shell"></div>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+APP.exigirAdmin();
+const u = APP.montarLayout('catalogo.html', 'Catálogo');
+const main = document.getElementById('main');
+
+const estado = { tab: 'productos', productos: [], categorias: [], proveedores: [], clientes: [] };
+
+main.innerHTML = `
+  <div class="tabs" id="tabs">
+    <button class="tab" data-tab="productos">Productos</button>
+    <button class="tab" data-tab="categorias">Categorías</button>
+    <button class="tab" data-tab="proveedores">Proveedores</button>
+    <button class="tab" data-tab="clientes">Clientes</button>
+  </div>
+  <div id="contenido-tab"></div>
+`;
+
+document.querySelectorAll('.tab').forEach(t => {
+  t.addEventListener('click', () => cambiarTab(t.dataset.tab));
+});
+cambiarTab('productos');
+
+function cambiarTab(tab) {
+  estado.tab = tab;
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('activo', t.dataset.tab === tab));
+  if (tab === 'productos') pintarProductos();
+  else if (tab === 'categorias') pintarCategorias();
+  else if (tab === 'proveedores') pintarProveedores();
+  else if (tab === 'clientes') pintarClientes();
+}
+
+/* ============================================================
+   PRODUCTOS
+   ============================================================ */
+
+async function pintarProductos(filtro = {}) {
+  const cont = document.getElementById('contenido-tab');
+  cont.innerHTML = '<div class="cargando">Cargando catálogo...</div>';
+
+  try {
+    const [productos, categorias, proveedores] = await Promise.all([
+      API.listarProductos({ incluir_inactivos: true, ...filtro }),
+      API.listarCategorias(),
+      API.listarProveedores()
+    ]);
+    estado.productos = productos; estado.categorias = categorias; estado.proveedores = proveedores;
+
+    cont.innerHTML = `
+      <div class="encabezado-tab">
+        <div class="filtros" style="margin-bottom:0">
+          <div class="campo">
+            <label for="f-buscar">Buscar</label>
+            <input type="text" id="f-buscar" placeholder="Código o nombre" value="${APP.escapar(filtro.buscar || '')}">
+          </div>
+          <div class="campo">
+            <label for="f-categoria">Categoría</label>
+            <select id="f-categoria">
+              <option value="">Todas</option>
+              ${categorias.map(c => `<option value="${c.CLAVE}" ${filtro.categoria===c.CLAVE?'selected':''}>${APP.escapar(c.NOMBRE)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="flex gap-8">
+          <button class="btn btn-secundario" id="btn-mov">Entrada de mercancía</button>
+          <button class="btn btn-primario" id="btn-nuevo">Nuevo producto</button>
+        </div>
+      </div>
+
+      <table class="mt-16">
+        <thead><tr>
+          <th>Código</th><th>Producto</th><th>Categoría</th><th>Proveedor</th>
+          <th class="alinear-derecha">Costo</th><th class="alinear-derecha">Venta</th>
+          <th class="alinear-derecha">Exist.</th><th></th><th></th>
+        </tr></thead>
+        <tbody id="tbody-productos"></tbody>
+      </table>
+    `;
+
+    document.getElementById('f-buscar').addEventListener('input', debounce(() => {
+      pintarProductos({ buscar: document.getElementById('f-buscar').value.trim(), categoria: document.getElementById('f-categoria').value });
+    }, 250));
+    document.getElementById('f-categoria').addEventListener('change', () => {
+      pintarProductos({ buscar: document.getElementById('f-buscar').value.trim(), categoria: document.getElementById('f-categoria').value });
+    });
+    document.getElementById('btn-nuevo').addEventListener('click', () => abrirModalProducto());
+    document.getElementById('btn-mov').addEventListener('click', () => abrirModalMovimiento());
+
+    const tbody = document.getElementById('tbody-productos');
+    if (!productos.length) {
+      tbody.innerHTML = `<tr><td colspan="9"><div class="vacio">No hay productos con ese filtro.</div></td></tr>`;
+    } else {
+      tbody.innerHTML = productos.map(p => `
+        <tr>
+          <td class="codigo">${APP.escapar(p.CODIGO)}</td>
+          <td>${APP.escapar(p.PRODUCTO)}</td>
+          <td>${APP.escapar(p.CATEGORIA)}</td>
+          <td>${APP.escapar(p.PROVEEDOR || '—')}</td>
+          <td class="num alinear-derecha">${APP.money(p.COSTO)}</td>
+          <td class="num alinear-derecha">${APP.money(p.VENTA)}</td>
+          <td class="num alinear-derecha ${p.EXISTENCIA<=0?'texto-suave':''}">${p.EXISTENCIA}</td>
+          <td class="chico">${p.ACTIVO === 'SI' ? '' : '<span class="estado estado-cancelado">Inactivo</span>'}</td>
+          <td class="chico"><button class="btn-mini" data-editar="${APP.escapar(p.CODIGO)}">Editar</button></td>
+        </tr>
+      `).join('');
+      tbody.querySelectorAll('[data-editar]').forEach(b => {
+        b.addEventListener('click', () => {
+          const prod = productos.find(p => p.CODIGO === b.dataset.editar);
+          abrirModalProducto(prod);
+        });
+      });
+    }
+  } catch (e) {
+    APP.errorApi(e, 'listar productos');
+    cont.innerHTML = '<div class="vacio">No se pudo cargar el catálogo.</div>';
+  }
+}
+
+function abrirModalProducto(prod) {
+  const editando = !!prod;
+  const cats = estado.categorias, provs = estado.proveedores;
+
+  const fondo = APP.abrirModal(`
+    <div class="modal-caja">
+      <div class="modal-cabecera">
+        <h3>${editando ? 'Editar producto' : 'Nuevo producto'}</h3>
+        <button class="modal-cerrar" id="m-cerrar">&times;</button>
+      </div>
+      <div class="modal-cuerpo">
+        <div class="campo">
+          <label for="m-categoria">Categoría</label>
+          <select id="m-categoria">
+            <option value="">Selecciona...</option>
+            ${cats.map(c => `<option value="${c.CLAVE}" ${prod?.CATEGORIA===c.CLAVE?'selected':''}>${APP.escapar(c.NOMBRE)} (${c.CLAVE})</option>`).join('')}
+          </select>
+        </div>
+        <div class="campo">
+          <label for="m-codigo">Código</label>
+          <input type="text" id="m-codigo" class="codigo" value="${editando ? APP.escapar(prod.CODIGO) : ''}" ${editando ? 'disabled' : 'readonly'} placeholder="Se genera al elegir categoría">
+        </div>
+        <div class="campo">
+          <label for="m-producto">Descripción</label>
+          <input type="text" id="m-producto" value="${editando ? APP.escapar(prod.PRODUCTO) : ''}">
+        </div>
+        <div class="fila-2">
+          <div class="campo">
+            <label for="m-proveedor">Proveedor</label>
+            <select id="m-proveedor">
+              <option value="">Sin proveedor</option>
+              ${provs.map(p => `<option value="${p.CLAVE}" ${prod?.PROVEEDOR===p.CLAVE?'selected':''}>${APP.escapar(p.NOMBRE)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="campo">
+            <label for="m-unidad">Unidad</label>
+            <input type="text" id="m-unidad" value="${editando ? APP.escapar(prod.UNIDAD || 'PZA') : 'PZA'}">
+          </div>
+        </div>
+        <div class="fila-2">
+          <div class="campo">
+            <label for="m-costo">Costo</label>
+            <input type="number" id="m-costo" step="0.01" min="0" value="${editando ? prod.COSTO : ''}">
+          </div>
+          <div class="campo">
+            <label for="m-venta">Precio de venta</label>
+            <input type="number" id="m-venta" step="0.01" min="0" value="${editando ? prod.VENTA : ''}">
+          </div>
+        </div>
+        ${editando ? `
+        <div class="campo-check">
+          <input type="checkbox" id="m-activo" ${prod.ACTIVO === 'SI' ? 'checked' : ''}>
+          <label for="m-activo">Producto activo (visible en ventas)</label>
+        </div>` : ''}
+      </div>
+      <div class="modal-pie">
+        ${editando ? '<button class="btn btn-peligro" id="m-baja" style="margin-right:auto">Desactivar</button>' : ''}
+        <button class="btn btn-secundario" id="m-cancelar">Cancelar</button>
+        <button class="btn btn-primario" id="m-guardar">Guardar</button>
+      </div>
+    </div>
+  `);
+
+  fondo.querySelector('#m-cerrar').addEventListener('click', APP.cerrarModal);
+  fondo.querySelector('#m-cancelar').addEventListener('click', APP.cerrarModal);
+
+  // Genera el código automáticamente al elegir categoría (solo para producto nuevo).
+  if (!editando) {
+    fondo.querySelector('#m-categoria').addEventListener('change', async (e) => {
+      const cat = e.target.value;
+      const campoCodigo = fondo.querySelector('#m-codigo');
+      if (!cat) { campoCodigo.value = ''; return; }
+      try {
+        const r = await API.siguienteCodigo(cat);
+        campoCodigo.value = r.CODIGO;
+      } catch (e2) { APP.errorApi(e2, 'siguiente código'); }
+    });
+  }
+
+  if (editando) {
+    fondo.querySelector('#m-baja').addEventListener('click', async () => {
+      if (!confirm(`¿Desactivar ${prod.CODIGO}? Ya no aparecerá en el punto de venta.`)) return;
+      try {
+        await API.desactivarProducto(prod.CODIGO);
+        APP.toast('Producto desactivado.', 'exito');
+        APP.cerrarModal();
+        pintarProductos();
+      } catch (e2) { APP.errorApi(e2, 'desactivar producto'); }
+    });
+  }
+
+  fondo.querySelector('#m-guardar').addEventListener('click', async () => {
+    const btn = fondo.querySelector('#m-guardar');
+    const datos = {
+      CODIGO: fondo.querySelector('#m-codigo').value.trim(),
+      CATEGORIA: fondo.querySelector('#m-categoria').value,
+      PRODUCTO: fondo.querySelector('#m-producto').value.trim(),
+      PROVEEDOR: fondo.querySelector('#m-proveedor').value,
+      UNIDAD: fondo.querySelector('#m-unidad').value.trim() || 'PZA',
+      COSTO: fondo.querySelector('#m-costo').value,
+      VENTA: fondo.querySelector('#m-venta').value
+    };
+    if (editando) datos.ACTIVO = fondo.querySelector('#m-activo').checked;
+
+    if (!datos.CATEGORIA) { APP.toast('Elige una categoría.', 'error'); return; }
+    if (!datos.PRODUCTO) { APP.toast('Escribe la descripción del producto.', 'error'); return; }
+
+    btn.disabled = true; btn.textContent = 'Guardando...';
+    try {
+      await API.guardarProducto(datos);
+      APP.toast('Producto guardado.', 'exito');
+      APP.cerrarModal();
+      pintarProductos();
+    } catch (e2) {
+      APP.errorApi(e2, 'guardar producto');
+      btn.disabled = false; btn.textContent = 'Guardar';
+    }
+  });
+}
+
+/** Entrada, ajuste o devolución a proveedor. No usa el ticket de venta a propósito:
+ *  son movimientos que solo el admin hace, con menor frecuencia. */
+function abrirModalMovimiento() {
+  const opciones = estado.productos.map(p => `<option value="${APP.escapar(p.CODIGO)}">${APP.escapar(p.CODIGO)} — ${APP.escapar(p.PRODUCTO)}</option>`).join('');
+
+  const fondo = APP.abrirModal(`
+    <div class="modal-caja">
+      <div class="modal-cabecera">
+        <h3>Entrada de mercancía</h3>
+        <button class="modal-cerrar" id="m-cerrar">&times;</button>
+      </div>
+      <div class="modal-cuerpo">
+        <div class="campo">
+          <label for="mv-tipo">Tipo de movimiento</label>
+          <select id="mv-tipo">
+            <option value="ENTRADA">Entrada (compra)</option>
+            <option value="AJUSTE">Ajuste de inventario</option>
+            <option value="DEV_PROVEEDOR">Devolución a proveedor</option>
+          </select>
+        </div>
+        <div class="campo">
+          <label for="mv-producto">Producto</label>
+          <input type="text" id="mv-producto" list="mv-lista-productos" placeholder="Escribe el código o nombre">
+          <datalist id="mv-lista-productos">${opciones}</datalist>
+        </div>
+        <div class="fila-2">
+          <div class="campo">
+            <label for="mv-cantidad" id="mv-cantidad-label">Cantidad</label>
+            <input type="number" id="mv-cantidad" step="1" min="1" value="1">
+          </div>
+          <div class="campo">
+            <label for="mv-costo">Costo unitario (opcional)</label>
+            <input type="number" id="mv-costo" step="0.01" min="0" placeholder="Del catálogo">
+          </div>
+        </div>
+        <div class="campo">
+          <label for="mv-nota">Nota (opcional)</label>
+          <input type="text" id="mv-nota" placeholder="Ej. factura del proveedor">
+        </div>
+        <div class="aviso" id="mv-ayuda">
+          La cantidad se suma a la existencia del producto.
+        </div>
+      </div>
+      <div class="modal-pie">
+        <button class="btn btn-secundario" id="m-cancelar">Cancelar</button>
+        <button class="btn btn-primario" id="m-guardar">Registrar</button>
+      </div>
+    </div>
+  `);
+
+  fondo.querySelector('#m-cerrar').addEventListener('click', APP.cerrarModal);
+  fondo.querySelector('#m-cancelar').addEventListener('click', APP.cerrarModal);
+
+  const selTipo = fondo.querySelector('#mv-tipo');
+  const campoCant = fondo.querySelector('#mv-cantidad');
+  const ayuda = fondo.querySelector('#mv-ayuda');
+
+  selTipo.addEventListener('change', () => {
+    const t = selTipo.value;
+    if (t === 'AJUSTE') {
+      campoCant.removeAttribute('min');
+      ayuda.textContent = 'Para un ajuste, usa cantidad negativa para restar existencia y positiva para sumarla.';
+    } else if (t === 'DEV_PROVEEDOR') {
+      campoCant.min = 1;
+      ayuda.textContent = 'La cantidad se resta de la existencia del producto.';
+    } else {
+      campoCant.min = 1;
+      ayuda.textContent = 'La cantidad se suma a la existencia del producto.';
+    }
+  });
+
+  fondo.querySelector('#m-guardar').addEventListener('click', async () => {
+    const texto = fondo.querySelector('#mv-producto').value.trim();
+    const codigo = texto.split('—')[0].trim().split(' ')[0].trim();
+    const prod = estado.productos.find(p => p.CODIGO.toUpperCase() === codigo.toUpperCase());
+    if (!prod) { APP.toast('Elige un producto de la lista.', 'error'); return; }
+
+    const cantidad = Number(campoCant.value);
+    if (!cantidad) { APP.toast('Escribe una cantidad distinta de cero.', 'error'); return; }
+
+    const btn = fondo.querySelector('#m-guardar');
+    btn.disabled = true; btn.textContent = 'Registrando...';
+    try {
+      await API.guardarMovimiento({
+        TIPO_MOV: selTipo.value,
+        CODIGO: prod.CODIGO,
+        CANTIDAD: cantidad,
+        COSTO: fondo.querySelector('#mv-costo').value || undefined,
+        NOTA: fondo.querySelector('#mv-nota').value.trim(),
+        ENTREGA: 'TIENDA'
+      });
+      APP.toast('Movimiento registrado.', 'exito');
+      APP.cerrarModal();
+      pintarProductos();
+    } catch (e2) {
+      APP.errorApi(e2, 'guardar movimiento');
+      btn.disabled = false; btn.textContent = 'Registrar';
+    }
+  });
+}
+
+/* ============================================================
+   CATEGORÍAS
+   ============================================================ */
+
+async function pintarCategorias() {
+  const cont = document.getElementById('contenido-tab');
+  cont.innerHTML = '<div class="cargando">Cargando categorías...</div>';
+  try {
+    const categorias = await API.listarCategorias();
+    cont.innerHTML = `
+      <div class="form-linea">
+        <div class="campo">
+          <label for="c-clave">Clave (3 a 6 letras)</label>
+          <input type="text" id="c-clave" maxlength="6" placeholder="Ej. ADHE" style="text-transform:uppercase">
+        </div>
+        <div class="campo">
+          <label for="c-nombre">Nombre</label>
+          <input type="text" id="c-nombre" placeholder="Ej. Adhesivos y selladores">
+        </div>
+        <button class="btn btn-primario" id="c-agregar">Agregar</button>
+      </div>
+      <table>
+        <thead><tr><th>Clave</th><th>Nombre</th><th></th></tr></thead>
+        <tbody>
+          ${categorias.map(c => `
+            <tr>
+              <td class="codigo">${APP.escapar(c.CLAVE)}</td>
+              <td>${APP.escapar(c.NOMBRE)}</td>
+              <td class="chico"><button class="btn-mini peligro" data-quitar="${APP.escapar(c.CLAVE)}">Quitar</button></td>
+            </tr>`).join('') || `<tr><td colspan="3"><div class="vacio">Sin categorías todavía.</div></td></tr>`}
+        </tbody>
+      </table>
+    `;
+
+    document.getElementById('c-agregar').addEventListener('click', async () => {
+      const clave = document.getElementById('c-clave').value.trim().toUpperCase();
+      const nombre = document.getElementById('c-nombre').value.trim();
+      if (!clave || !nombre) { APP.toast('Escribe clave y nombre.', 'error'); return; }
+      try {
+        await API.guardarCategoria({ CLAVE: clave, NOMBRE: nombre });
+        APP.toast('Categoría guardada.', 'exito');
+        pintarCategorias();
+      } catch (e) { APP.errorApi(e, 'guardar categoría'); }
+    });
+
+    cont.querySelectorAll('[data-quitar]').forEach(b => {
+      b.addEventListener('click', async () => {
+        if (!confirm(`¿Quitar la categoría ${b.dataset.quitar}?`)) return;
+        try {
+          await API.quitarCategoria(b.dataset.quitar);
+          pintarCategorias();
+        } catch (e) { APP.errorApi(e, 'quitar categoría'); }
+      });
+    });
+  } catch (e) {
+    APP.errorApi(e, 'listar categorías');
+    cont.innerHTML = '<div class="vacio">No se pudieron cargar las categorías.</div>';
+  }
+}
+
+/* ============================================================
+   PROVEEDORES
+   ============================================================ */
+
+async function pintarProveedores() {
+  const cont = document.getElementById('contenido-tab');
+  cont.innerHTML = '<div class="cargando">Cargando proveedores...</div>';
+  try {
+    const proveedores = await API.listarProveedores();
+    cont.innerHTML = `
+      <div class="rejilla rejilla-4" style="align-items:flex-end;margin-bottom:18px">
+        <div class="campo"><label for="p-clave">Clave</label><input type="text" id="p-clave" style="text-transform:uppercase"></div>
+        <div class="campo"><label for="p-nombre">Nombre</label><input type="text" id="p-nombre"></div>
+        <div class="campo"><label for="p-contacto">Contacto</label><input type="text" id="p-contacto"></div>
+        <button class="btn btn-primario" id="p-agregar">Agregar</button>
+      </div>
+      <table>
+        <thead><tr><th>Clave</th><th>Nombre</th><th>Contacto</th><th>Teléfono</th><th></th></tr></thead>
+        <tbody>
+          ${proveedores.map(p => `
+            <tr>
+              <td class="codigo">${APP.escapar(p.CLAVE)}</td>
+              <td>${APP.escapar(p.NOMBRE)}</td>
+              <td>${APP.escapar(p.CONTACTO || '—')}</td>
+              <td>${APP.escapar(p.TELEFONO || '—')}</td>
+              <td class="chico"><button class="btn-mini peligro" data-quitar="${APP.escapar(p.CLAVE)}">Quitar</button></td>
+            </tr>`).join('') || `<tr><td colspan="5"><div class="vacio">Sin proveedores todavía.</div></td></tr>`}
+        </tbody>
+      </table>
+    `;
+
+    document.getElementById('p-agregar').addEventListener('click', async () => {
+      const clave = document.getElementById('p-clave').value.trim().toUpperCase();
+      const nombre = document.getElementById('p-nombre').value.trim();
+      if (!clave || !nombre) { APP.toast('Escribe clave y nombre.', 'error'); return; }
+      try {
+        await API.guardarProveedor({ CLAVE: clave, NOMBRE: nombre, CONTACTO: document.getElementById('p-contacto').value.trim() });
+        APP.toast('Proveedor guardado.', 'exito');
+        pintarProveedores();
+      } catch (e) { APP.errorApi(e, 'guardar proveedor'); }
+    });
+
+    cont.querySelectorAll('[data-quitar]').forEach(b => {
+      b.addEventListener('click', async () => {
+        if (!confirm(`¿Quitar el proveedor ${b.dataset.quitar}?`)) return;
+        try {
+          await API.quitarProveedor(b.dataset.quitar);
+          pintarProveedores();
+        } catch (e) { APP.errorApi(e, 'quitar proveedor'); }
+      });
+    });
+  } catch (e) {
+    APP.errorApi(e, 'listar proveedores');
+    cont.innerHTML = '<div class="vacio">No se pudieron cargar los proveedores.</div>';
+  }
+}
+
+/* ============================================================
+   CLIENTES
+   ============================================================ */
+
+async function pintarClientes(buscar = '') {
+  const cont = document.getElementById('contenido-tab');
+  cont.innerHTML = '<div class="cargando">Cargando clientes...</div>';
+  try {
+    const clientes = await API.listarClientes({ buscar });
+    cont.innerHTML = `
+      <div class="filtros">
+        <div class="campo"><label for="cl-buscar">Buscar</label><input type="text" id="cl-buscar" value="${APP.escapar(buscar)}"></div>
+        <button class="btn btn-primario" id="cl-nuevo" style="margin-left:auto">Nuevo cliente</button>
+      </div>
+      <table>
+        <thead><tr><th>Nombre</th><th>Teléfono</th><th>Domicilio</th><th class="alinear-derecha">Límite crédito</th><th></th></tr></thead>
+        <tbody>
+          ${clientes.map(c => `
+            <tr>
+              <td>${APP.escapar(c.NOMBRE)}</td>
+              <td>${APP.escapar(c.TELEFONO || '—')}</td>
+              <td>${APP.escapar(c.DOMICILIO || '—')}</td>
+              <td class="num alinear-derecha">${APP.money(c.LIMITE_CREDITO)}</td>
+              <td class="chico"><button class="btn-mini" data-editar="${APP.escapar(c.ID_CLIENTE)}">Editar</button></td>
+            </tr>`).join('') || `<tr><td colspan="5"><div class="vacio">Sin clientes registrados.</div></td></tr>`}
+        </tbody>
+      </table>
+    `;
+
+    document.getElementById('cl-buscar').addEventListener('input', debounce((e) => pintarClientes(e.target.value), 250));
+    document.getElementById('cl-nuevo').addEventListener('click', () => abrirModalCliente());
+
+    cont.querySelectorAll('[data-editar]').forEach(b => {
+      b.addEventListener('click', () => {
+        const cli = clientes.find(c => c.ID_CLIENTE === b.dataset.editar);
+        abrirModalCliente(cli);
+      });
+    });
+  } catch (e) {
+    APP.errorApi(e, 'listar clientes');
+    cont.innerHTML = '<div class="vacio">No se pudieron cargar los clientes.</div>';
+  }
+}
+
+function abrirModalCliente(cli) {
+  const editando = !!cli;
+  const fondo = APP.abrirModal(`
+    <div class="modal-caja">
+      <div class="modal-cabecera">
+        <h3>${editando ? 'Editar cliente' : 'Nuevo cliente'}</h3>
+        <button class="modal-cerrar" id="m-cerrar">&times;</button>
+      </div>
+      <div class="modal-cuerpo">
+        <div class="campo"><label for="cl-nombre">Nombre</label><input type="text" id="cl-nombre" value="${editando ? APP.escapar(cli.NOMBRE) : ''}"></div>
+        <div class="campo"><label for="cl-telefono">Teléfono</label><input type="text" id="cl-telefono" value="${editando ? APP.escapar(cli.TELEFONO) : ''}"></div>
+        <div class="campo"><label for="cl-domicilio">Domicilio</label><input type="text" id="cl-domicilio" value="${editando ? APP.escapar(cli.DOMICILIO) : ''}"></div>
+        <div class="fila-2">
+          <div class="campo"><label for="cl-rfc">RFC (opcional)</label><input type="text" id="cl-rfc" value="${editando ? APP.escapar(cli.RFC) : ''}"></div>
+          <div class="campo"><label for="cl-limite">Límite de crédito</label><input type="number" id="cl-limite" min="0" step="1" value="${editando ? cli.LIMITE_CREDITO : 0}"></div>
+        </div>
+      </div>
+      <div class="modal-pie">
+        <button class="btn btn-secundario" id="m-cancelar">Cancelar</button>
+        <button class="btn btn-primario" id="m-guardar">Guardar</button>
+      </div>
+    </div>
+  `);
+
+  fondo.querySelector('#m-cerrar').addEventListener('click', APP.cerrarModal);
+  fondo.querySelector('#m-cancelar').addEventListener('click', APP.cerrarModal);
+  fondo.querySelector('#m-guardar').addEventListener('click', async () => {
+    const nombre = fondo.querySelector('#cl-nombre').value.trim();
+    if (!nombre) { APP.toast('Escribe el nombre del cliente.', 'error'); return; }
+    const btn = fondo.querySelector('#m-guardar');
+    btn.disabled = true; btn.textContent = 'Guardando...';
+    try {
+      await API.guardarCliente({
+        ID_CLIENTE: editando ? cli.ID_CLIENTE : undefined,
+        NOMBRE: nombre,
+        TELEFONO: fondo.querySelector('#cl-telefono').value.trim(),
+        DOMICILIO: fondo.querySelector('#cl-domicilio').value.trim(),
+        RFC: fondo.querySelector('#cl-rfc').value.trim(),
+        LIMITE_CREDITO: fondo.querySelector('#cl-limite').value
+      });
+      APP.toast('Cliente guardado.', 'exito');
+      APP.cerrarModal();
+      pintarClientes();
+    } catch (e) {
+      APP.errorApi(e, 'guardar cliente');
+      btn.disabled = false; btn.textContent = 'Guardar';
+    }
+  });
+}
+
+/* ---------------- Utilidad ---------------- */
+
+function debounce(fn, ms) {
+  let t;
+  return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+}
+</script>
+</body>
+</html>

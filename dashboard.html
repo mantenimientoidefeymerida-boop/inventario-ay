@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inicio — Acabados Yucatán</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/estilo.css">
+<style>
+  .main { background: var(--concreto); }
+  .saludo { font-size: 14px; color: var(--texto-suave); margin-bottom: 20px; }
+  .accesos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 10px; }
+  .acceso {
+    background: var(--cal); border: 1px solid var(--linea); border-radius: var(--radio);
+    padding: 20px; display: flex; flex-direction: column; gap: 10px;
+    transition: border-color .12s;
+  }
+  .acceso:hover { border-color: var(--acero); text-decoration: none; }
+  .acceso svg { width: 26px; height: 26px; color: var(--acero); }
+  .acceso .t { font-size: 15px; font-weight: 600; color: var(--concreto-osc); }
+  .acceso .d { font-size: 12.5px; color: var(--texto-suave); }
+
+  .tira-alerta {
+    background: rgba(162,62,43,0.07); border: 1px solid var(--rojo-ladrillo);
+    border-radius: var(--radio); padding: 12px 16px; margin-bottom: 20px;
+    display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--rojo-ladrillo);
+  }
+  .tira-alerta svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+  .desglose { display: flex; gap: 14px; margin-top: 10px; flex-wrap: wrap; }
+  .desglose .item { font-size: 12.5px; color: var(--texto-suave); }
+  .desglose .item b { color: var(--concreto-osc); font-family: var(--fuente-mono); }
+
+  @media (max-width: 860px) { .accesos { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div id="app-shell"></div>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+  const u = APP.montarLayout('dashboard.html', 'Inicio');
+  const main = document.getElementById('main');
+
+  if (u.rol === 'admin') pintarAdmin();
+  else pintarVendedor();
+
+  /* ---------------- Vista administrador ---------------- */
+
+  async function pintarAdmin() {
+    main.innerHTML = '<div class="cargando">Cargando el panorama del día...</div>';
+    try {
+      const d = await API.dashboard();
+      const alertaStock = d.SIN_EXISTENCIA > 0
+        ? `<div class="tira-alerta">
+             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 9v4"/><circle cx="12" cy="16" r="0.6" fill="currentColor"/><path d="M10.3 3.9 2.6 17.5A1 1 0 0 0 3.4 19h17.2a1 1 0 0 0 .9-1.5L13.7 3.9a1 1 0 0 0-1.7 0z"/></svg>
+             ${d.SIN_EXISTENCIA} producto${d.SIN_EXISTENCIA === 1 ? '' : 's'} sin existencia en este momento.
+           </div>`
+        : '';
+
+      main.innerHTML = `
+        <p class="saludo">Hola, ${APP.escapar(u.nombre)}. Hoy es ${APP.escapar(d.FECHA)} · semana ${APP.escapar(d.SEMANA)}.</p>
+
+        ${alertaStock}
+
+        <div class="panel-titulo">Corte de hoy</div>
+        <div class="rejilla rejilla-4">
+          <div class="ficha ok">
+            <div class="etiqueta">Ventas de hoy</div>
+            <div class="valor">${APP.money(d.HOY.VENTAS_TOTAL)}</div>
+            <div class="desglose">
+              <span class="item">efect. <b>${APP.money(d.HOY.VENTAS_EFECTIVO)}</b></span>
+              <span class="item">tarjeta <b>${APP.money(d.HOY.VENTAS_TARJETA)}</b></span>
+              <span class="item">crédito <b>${APP.money(d.HOY.VENTAS_CREDITO)}</b></span>
+            </div>
+          </div>
+          <div class="ficha">
+            <div class="etiqueta">Utilidad de hoy</div>
+            <div class="valor">${APP.money(d.HOY.UTILIDAD)}</div>
+            <div class="detalle">margen ${d.HOY.MARGEN_PCT}%</div>
+          </div>
+          <div class="ficha pendiente">
+            <div class="etiqueta">Efectivo a entregar</div>
+            <div class="valor">${APP.money(d.HOY.EFECTIVO_A_ENTREGAR)}</div>
+            <div class="detalle">fondo de caja $500 · <a href="cortes.html">hacer corte</a></div>
+          </div>
+          <div class="ficha alerta">
+            <div class="etiqueta">Gastos de hoy</div>
+            <div class="valor">${APP.money(d.HOY.GASTOS_TOTAL)}</div>
+            <div class="detalle">incluye sueldos ${APP.money(d.HOY.SUELDOS)}</div>
+          </div>
+        </div>
+
+        <div class="panel-titulo mt-24">Semana ${APP.escapar(d.SEMANA)}</div>
+        <div class="rejilla rejilla-4">
+          <div class="ficha ok">
+            <div class="etiqueta">Ventas de la semana</div>
+            <div class="valor">${APP.money(d.SEMANA_ACTUAL.VENTAS_TOTAL)}</div>
+          </div>
+          <div class="ficha">
+            <div class="etiqueta">Utilidad de la semana</div>
+            <div class="valor">${APP.money(d.SEMANA_ACTUAL.UTILIDAD)}</div>
+            <div class="detalle">margen ${d.SEMANA_ACTUAL.MARGEN_PCT}%</div>
+          </div>
+          <div class="ficha pendiente">
+            <div class="etiqueta">Por cobrar (crédito y consigna)</div>
+            <div class="valor">${APP.money(d.POR_COBRAR)}</div>
+            <div class="detalle"><a href="cortes.html">ver detalle</a></div>
+          </div>
+          <div class="ficha">
+            <div class="etiqueta">Valor de inventario</div>
+            <div class="valor">${APP.money(d.VALOR_INVENTARIO)}</div>
+            <div class="detalle">al costo</div>
+          </div>
+        </div>
+
+        <div class="panel-titulo mt-24">Accesos rápidos</div>
+        <div class="accesos">
+          <a class="acceso" href="venta.html">${APP.ICONOS.venta}<span class="t">Registrar una venta</span><span class="d">Buscar producto y cobrar</span></a>
+          <a class="acceso" href="cotizaciones.html">${APP.ICONOS.cotizacion}<span class="t">Nueva cotización</span><span class="d">Armar y descargar PDF</span></a>
+          <a class="acceso" href="catalogo.html">${APP.ICONOS.catalogo}<span class="t">Catálogo de productos</span><span class="d">Altas, precios y existencias</span></a>
+        </div>
+      `;
+    } catch (e) {
+      APP.errorApi(e, 'dashboard');
+      main.innerHTML = '<div class="vacio">No se pudo cargar el panorama del día.</div>';
+    }
+  }
+
+  /* ---------------- Vista vendedor ---------------- */
+
+  async function pintarVendedor() {
+    main.innerHTML = '<div class="cargando">Cargando tus ventas de hoy...</div>';
+    try {
+      const hoy = new Date().toISOString().slice(0, 10);
+      const r = await API.reporteMovimientos({ desde: hoy, hasta: hoy, tipo_mov: 'SALIDA' });
+
+      main.innerHTML = `
+        <p class="saludo">Hola, ${APP.escapar(u.nombre)}. Este es tu resumen de hoy.</p>
+
+        <div class="rejilla rejilla-3">
+          <div class="ficha ok">
+            <div class="etiqueta">Vendido hoy</div>
+            <div class="valor">${APP.money(r.totales.TOTAL_VENTA || 0)}</div>
+          </div>
+          <div class="ficha">
+            <div class="etiqueta">Piezas vendidas hoy</div>
+            <div class="valor">${r.totales.CANTIDAD || 0}</div>
+          </div>
+          <div class="ficha">
+            <div class="etiqueta">Notas registradas</div>
+            <div class="valor">${r.filas.length}</div>
+          </div>
+        </div>
+
+        <div class="panel-titulo mt-24">Accesos rápidos</div>
+        <div class="accesos">
+          <a class="acceso" href="venta.html">${APP.ICONOS.venta}<span class="t">Registrar una venta</span><span class="d">Buscar producto y cobrar</span></a>
+          <a class="acceso" href="cotizaciones.html">${APP.ICONOS.cotizacion}<span class="t">Nueva cotización</span><span class="d">Armar y descargar PDF</span></a>
+        </div>
+      `;
+    } catch (e) {
+      APP.errorApi(e, 'dashboard vendedor');
+      main.innerHTML = '<div class="vacio">No se pudo cargar tu resumen de hoy.</div>';
+    }
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="es-MX">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Caja y cobranza — Acabados Yucatán</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/estilo.css">
+<style>
+  .franja { display: flex; gap: 14px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 20px; }
+  .franja .campo { min-width: 150px; }
+  .radios { display: flex; gap: 14px; padding-bottom: 10px; }
+  .radios label { display: flex; align-items: center; gap: 6px; font-size: 13.5px; font-weight: 500; }
+  .franja-diferencia { display: flex; align-items: center; gap: 14px; margin-top: 18px; padding: 14px 16px; border: 1px solid var(--linea); border-radius: var(--radio); background: var(--cal); }
+  .franja-diferencia .campo { max-width: 160px; }
+  .dif-valor { font-family: var(--fuente-mono); font-size: 20px; font-weight: 700; }
+  .dif-valor.ok { color: var(--verde-obra); }
+  .dif-valor.falta { color: var(--rojo-ladrillo); }
+  .dif-valor.sobra { color: var(--oxido); }
+  .fila-cliente { cursor: pointer; }
+  .fila-cliente:hover { background: rgba(43,110,119,0.06); }
+</style>
+</head>
+<body>
+
+<div id="app-shell"></div>
+
+<script src="js/api.js"></script>
+<script src="js/app.js"></script>
+<script>
+APP.exigirAdmin();
+const u = APP.montarLayout('cortes.html', 'Caja y cobranza');
+const main = document.getElementById('main');
+
+main.innerHTML = `
+  <div class="tabs" id="tabs">
+    <button class="tab" data-tab="corte">Corte de caja</button>
+    <button class="tab" data-tab="cobrar">Cuentas por cobrar</button>
+    <button class="tab" data-tab="gastos">Gastos</button>
+  </div>
+  <div id="contenido-tab"></div>
+`;
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => cambiarTab(t.dataset.tab)));
+cambiarTab('corte');
+
+function cambiarTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('activo', t.dataset.tab === tab));
+  if (tab === 'corte') pintarCorte();
+  else if (tab === 'cobrar') pintarCobrar();
+  else pintarGastos();
+}
+
+function hoyISO() { return new Date().toISOString().slice(0, 10); }
+function lunesISO() {
+  const d = new Date();
+  const dia = d.getDay() || 7;
+  d.setDate(d.getDate() - dia + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+/* ============================================================
+   CORTE DE CAJA
+   ============================================================ */
+
+let corteActual = null;
+
+async function pintarCorte() {
+  const cont = document.getElementById('contenido-tab');
+  cont.innerHTML = `
+    <div class="panel">
+      <div class="franja">
+        <div class="radios">
+          <label><input type="radio" name="cr-tipo" value="DIARIO" checked> Diario</label>
+          <label><input type="radio" name="cr-tipo" value="SEMANAL"> Semanal</label>
+        </div>
+        <div class="campo"><label for="cr-desde">Desde</label><input type="date" id="cr-desde" value="${hoyISO()}"></div>
+        <div class="campo"><label for="cr-hasta">Hasta</label><input type="date" id="cr-hasta" value="${hoyISO()}" disabled></div>
+        <button class="btn btn-primario" id="cr-calcular">Calcular</button>
+      </div>
+      <div id="cr-resultado"></div>
+    </div>
+
+    <div class="panel-titulo mt-24">Cortes cerrados</div>
+    <table>
+      <thead><tr><th>Folio</th><th>Tipo</th><th>Del</th><th>Al</th><th class="alinear-derecha">Ventas</th><th class="alinear-derecha">A entregar</th><th class="alinear-derecha">Diferencia</th></tr></thead>
+      <tbody id="tbody-cortes"><tr><td colspan="7"><div class="cargando">Cargando...</div></td></tr></tbody>
+    </table>
+  `;
+
+  document.querySelectorAll('[name="cr-tipo"]').forEach(r => r.addEventListener('change', () => {
+    const semanal = document.querySelector('[name="cr-tipo"]:checked').value === 'SEMANAL';
+    document.getElementById('cr-hasta').disabled = !semanal;
+    document.getElementById('cr-desde').value = semanal ? lunesISO() : hoyISO();
+    document.getElementById('cr-hasta').value = hoyISO();
+  }));
+
+  document.getElementById('cr-calcular').addEventListener('click', calcularCorte);
+
+  cargarHistorialCortes();
+}
+
+async function calcularCorte() {
+  const tipo = document.querySelector('[name="cr-tipo"]:checked').value;
+  const desde = document.getElementById('cr-desde').value;
+  const hasta = tipo === 'SEMANAL' ? document.getElementById('cr-hasta').value : desde;
+
+  const cont = document.getElementById('cr-resultado');
+  cont.innerHTML = '<div class="cargando">Calculando...</div>';
+  try {
+    const c = await API.calcularCorte({ desde, hasta, tipo });
+    corteActual = { ...c, desde, hasta, tipo };
+    pintarResultadoCorte(c);
+  } catch (e) {
+    APP.errorApi(e, 'calcular corte');
+    cont.innerHTML = '<div class="vacio">No se pudo calcular el corte.</div>';
+  }
+}
+
+function pintarResultadoCorte(c) {
+  const cont = document.getElementById('cr-resultado');
+  cont.innerHTML = `
+    <div class="panel-titulo mt-24">Ventas ${c.TIPO === 'DIARIO' ? 'del día' : 'de la semana'} (${c.FECHA_INI} - ${c.FECHA_FIN})</div>
+    <div class="rejilla rejilla-4">
+      <div class="ficha ok"><div class="etiqueta">Ventas totales</div><div class="valor">${APP.money(c.VENTAS_TOTAL)}</div>
+        <div class="desglose"><span class="item">efect. <b>${APP.money(c.VENTAS_EFECTIVO)}</b></span><span class="item">tarjeta <b>${APP.money(c.VENTAS_TARJETA)}</b></span><span class="item">transf. <b>${APP.money(c.VENTAS_TRANSFER)}</b></span></div>
+      </div>
+      <div class="ficha pendiente"><div class="etiqueta">Crédito y consigna</div><div class="valor">${APP.money(c.VENTAS_CREDITO)}</div>
+        <div class="detalle">de ahí, consigna: ${APP.money(c.VENTAS_CONSIGNA)}</div>
+      </div>
+      <div class="ficha"><div class="etiqueta">Utilidad</div><div class="valor">${APP.money(c.UTILIDAD)}</div><div class="detalle">margen ${c.MARGEN_PCT}%</div></div>
+      <div class="ficha alerta"><div class="etiqueta">Gastos</div><div class="valor">${APP.money(c.GASTOS_TOTAL)}</div><div class="detalle">sueldos ${APP.money(c.SUELDOS)}</div></div>
+    </div>
+
+    <div class="franja-diferencia">
+      <div class="campo"><label for="cr-fondo">Fondo de caja</label><input type="text" id="cr-fondo" value="${APP.money(c.FONDO_CAJA)}" disabled></div>
+      <div class="campo"><label for="cr-esperado">Esperado en caja</label><input type="text" value="${APP.money(c.EFECTIVO_ESPERADO)}" disabled></div>
+      <div class="campo"><label for="cr-contado">Efectivo contado</label><input type="number" id="cr-contado" step="0.5" min="0" placeholder="0.00"></div>
+      <div>
+        <div class="texto-chico texto-suave">A entregar / diferencia</div>
+        <div class="dif-valor" id="cr-dif-valor">${APP.money(c.EFECTIVO_A_ENTREGAR)}</div>
+      </div>
+      <button class="btn btn-secundario" id="cr-recalc" style="margin-left:auto">Comparar</button>
+    </div>
+
+    <button class="btn btn-primario btn-grande mt-16" id="cr-cerrar">Cerrar corte</button>
+  `;
+
+  document.getElementById('cr-recalc').addEventListener('click', async () => {
+    const contado = document.getElementById('cr-contado').value;
+    try {
+      const c2 = await API.calcularCorte({ desde: corteActual.desde, hasta: corteActual.hasta, tipo: corteActual.tipo, efectivo_contado: contado });
+      corteActual = { ...c2, desde: corteActual.desde, hasta: corteActual.hasta, tipo: corteActual.tipo };
+      const el = document.getElementById('cr-dif-valor');
+      if (contado === '') { el.textContent = APP.money(c2.EFECTIVO_A_ENTREGAR); el.className = 'dif-valor'; }
+      else {
+        const dif = Number(c2.DIFERENCIA);
+        el.textContent = (dif > 0 ? '+' : '') + APP.money(dif) + (dif === 0 ? ' - cuadra' : dif < 0 ? ' - falta' : ' - sobra');
+        el.className = 'dif-valor ' + (dif === 0 ? 'ok' : dif < 0 ? 'falta' : 'sobra');
+      }
+    } catch (e) { APP.errorApi(e, 'comparar efectivo'); }
+  });
+
+  document.getElementById('cr-cerrar').addEventListener('click', cerrarCorte);
+}
+
+async function cerrarCorte() {
+  if (!corteActual) return;
+  if (!confirm(`¿Cerrar el corte ${corteActual.TIPO.toLowerCase()} del ${corteActual.FECHA_INI} al ${corteActual.FECHA_FIN}? Esta acción queda registrada.`)) return;
+
+  const btn = document.getElementById('cr-cerrar');
+  btn.disabled = true; btn.textContent = 'Cerrando...';
+  try {
+    const contado = document.getElementById('cr-contado').value;
+    await API.cerrarCorte({
+      desde: corteActual.desde, hasta: corteActual.hasta, tipo: corteActual.tipo,
+      efectivo_contado: contado || undefined
+    });
+    APP.toast('Corte cerrado correctamente.', 'exito');
+    document.getElementById('cr-resultado').innerHTML = '';
+    corteActual = null;
+    cargarHistorialCortes();
+  } catch (e) {
+    APP.errorApi(e, 'cerrar corte');
+    btn.disabled = false; btn.textContent = 'Cerrar corte';
+  }
+}
+
+async function cargarHistorialCortes() {
+  const tbody = document.getElementById('tbody-cortes');
+  try {
+    const cortes = await API.listarCortes();
+    if (!cortes.length) { tbody.innerHTML = `<tr><td colspan="7"><div class="vacio">Todavía no hay cortes cerrados.</div></td></tr>`; return; }
+    tbody.innerHTML = cortes.map(c => `
+      <tr>
+        <td class="folio">${APP.escapar(c.ID_CORTE)}</td>
+        <td>${c.TIPO === 'DIARIO' ? 'Diario' : 'Semanal'}</td>
+        <td>${APP.escapar(c.FECHA_INI)}</td>
+        <td>${APP.escapar(c.FECHA_FIN)}</td>
+        <td class="num alinear-derecha">${APP.money(c.VENTAS_TOTAL)}</td>
+        <td class="num alinear-derecha">${APP.money(c.EFECTIVO_A_ENTREGAR)}</td>
+        <td class="num alinear-derecha" style="color:${c.DIFERENCIA === 0 ? 'var(--verde-obra)' : c.DIFERENCIA < 0 ? 'var(--rojo-ladrillo)' : 'var(--oxido)'}">${c.DIFERENCIA > 0 ? '+' : ''}${APP.money(c.DIFERENCIA)}</td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    APP.errorApi(e, 'listar cortes');
+    tbody.innerHTML = `<tr><td colspan="7"><div class="vacio">No se pudo cargar el historial.</div></td></tr>`;
+  }
+}
+
+/* ============================================================
+   CUENTAS POR COBRAR
+   ============================================================ */
+
+async function pintarCobrar() {
+  const cont = document.getElementById('contenido-tab');
+  cont.innerHTML = '<div class="cargando">Cargando cuentas por cobrar...</div>';
+  try {
+    const r = await API.cuentasPorCobrar();
+    cont.innerHTML = `
+      <div class="ficha pendiente mt-16" style="margin-bottom:20px">
+        <div class="etiqueta">Total por cobrar</div>
+        <div class="valor">${APP.money(r.TOTAL)}</div>
+      </div>
+      <table>
+        <thead><tr><th>Cliente</th><th class="alinear-derecha">Saldo total</th><th class="alinear-derecha">De consigna</th><th></th></tr></thead>
+        <tbody>
+          ${r.clientes.map(c => `
+            <tr class="fila-cliente" data-cliente="${APP.escapar(c.CLIENTE)}">
+              <td>${APP.escapar(c.CLIENTE)}</td>
+              <td class="num alinear-derecha">${APP.money(c.SALDO)}</td>
+              <td class="num alinear-derecha texto-suave">${c.SALDO_CONSIGNA > 0 ? APP.money(c.SALDO_CONSIGNA) : '-'}</td>
+              <td class="chico"><button class="btn-mini">Ver detalle</button></td>
+            </tr>`).join('') || `<tr><td colspan="4"><div class="vacio">No hay saldos pendientes. Buen trabajo.</div></td></tr>`}
+        </tbody>
+      </table>
+    `;
+    cont.querySelectorAll('.fila-cliente').forEach(fila => {
+      const cli = r.clientes.find(c => c.CLIENTE === fila.dataset.cliente);
+      fila.addEventListener('click', () => abrirDetalleCliente(cli));
+    });
+  } catch (e) {
+    APP.errorApi(e, 'cuentas por cobrar');
+    cont.innerHTML = '<div class="vacio">No se pudo cargar la información.</div>';
+  }
+}
+
+function abrirDetalleCliente(cli) {
+  const fondo = APP.abrirModal(`
+    <div class="modal-caja ancha">
+      <div class="modal-cabecera"><h3>${APP.escapar(cli.CLIENTE)}</h3><button class="modal-cerrar" id="m-cerrar">&times;</button></div>
+      <div class="modal-cuerpo" style="padding-top:0">
+        <table>
+          <thead><tr><th>Fecha</th><th>Nota</th><th>Producto</th><th class="alinear-derecha">Monto</th><th></th><th></th></tr></thead>
+          <tbody id="tbody-partidas">
+            ${cli.PARTIDAS.map(p => `
+              <tr>
+                <td>${APP.escapar(p.FECHA)}</td>
+                <td class="folio">${APP.escapar(p.NOTA || p.NUM_FACTURA || '-')}</td>
+                <td>${APP.escapar(p.PRODUCTO)}</td>
+                <td class="num alinear-derecha">${APP.money(p.MONTO)}</td>
+                <td>${esSiJS(p.CONSIGNA) ? '<span class="estado estado-pendiente">consigna</span>' : ''}</td>
+                <td><button class="btn-mini" data-pagar="${APP.escapar(p.ID_MOV)}">Marcar pagado</button></td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-pie"><button class="btn btn-secundario" id="m-cancelar">Cerrar</button></div>
+    </div>
+  `);
+  fondo.querySelector('#m-cerrar').addEventListener('click', APP.cerrarModal);
+  fondo.querySelector('#m-cancelar').addEventListener('click', APP.cerrarModal);
+  fondo.querySelectorAll('[data-pagar]').forEach(b => {
+    b.addEventListener('click', async () => {
+      try {
+        await API.marcarPagado({ ID_MOV: b.dataset.pagar });
+        APP.toast('Movimiento marcado como pagado.', 'exito');
+        APP.cerrarModal();
+        pintarCobrar();
+      } catch (e) { APP.errorApi(e, 'marcar pagado'); }
+    });
+  });
+}
+
+function esSiJS(v) { return v === 'SI' || v === true; }
+
+/* ============================================================
+   GASTOS
+   ============================================================ */
+
+async function pintarGastos(filtro = {}) {
+  const cont = document.getElementById('contenido-tab');
+  cont.innerHTML = '<div class="cargando">Cargando gastos...</div>';
+  try {
+    const [r, cats] = await Promise.all([API.listarGastos(filtro), API.catalogos()]);
+    cont.innerHTML = `
+      <div class="encabezado-tab flex-entre">
+        <div class="filtros" style="margin-bottom:0">
+          <div class="campo"><label for="g-desde">Desde</label><input type="date" id="g-desde" value="${filtro.desde || ''}"></div>
+          <div class="campo"><label for="g-hasta">Hasta</label><input type="date" id="g-hasta" value="${filtro.hasta || ''}"></div>
+          <div class="campo">
+            <label for="g-categoria">Categoría</label>
+            <select id="g-categoria"><option value="">Todas</option>${cats.CAT_GASTO.map(c => `<option value="${c}" ${filtro.categoria===c?'selected':''}>${etiquetaCatGasto(c)}</option>`).join('')}</select>
+          </div>
+          <button class="btn btn-secundario" id="g-filtrar">Filtrar</button>
+        </div>
+        <button class="btn btn-primario" id="g-nuevo">Nuevo gasto</button>
+      </div>
+
+      <div class="ficha alerta mt-16" style="margin-bottom:16px"><div class="etiqueta">Total del periodo</div><div class="valor">${APP.money(r.TOTAL)}</div></div>
+
+      <table>
+        <thead><tr><th>Fecha</th><th>Categoría</th><th>Concepto</th><th>Beneficiario</th><th class="alinear-derecha">Monto</th><th>Cobro</th><th></th></tr></thead>
+        <tbody>
+          ${r.filas.map(g => `
+            <tr>
+              <td>${APP.escapar(g.FECHA)}</td>
+              <td>${etiquetaCatGasto(g.CATEGORIA)}</td>
+              <td>${APP.escapar(g.CONCEPTO)}</td>
+              <td>${APP.escapar(g.BENEFICIARIO || '-')}</td>
+              <td class="num alinear-derecha">${APP.money(g.MONTO)}</td>
+              <td class="texto-chico">${etiquetaCobro(g.TIPO_COBRO)}</td>
+              <td class="chico"><button class="btn-mini peligro" data-cancelar="${APP.escapar(g.ID_GASTO)}">Cancelar</button></td>
+            </tr>`).join('') || `<tr><td colspan="7"><div class="vacio">Sin gastos registrados en este periodo.</div></td></tr>`}
+        </tbody>
+      </table>
+    `;
+
+    document.getElementById('g-filtrar').addEventListener('click', () => pintarGastos({
+      desde: document.getElementById('g-desde').value, hasta: document.getElementById('g-hasta').value,
+      categoria: document.getElementById('g-categoria').value
+    }));
+    document.getElementById('g-nuevo').addEventListener('click', () => abrirModalGasto(cats));
+    cont.querySelectorAll('[data-cancelar]').forEach(b => {
+      b.addEventListener('click', async () => {
+        if (!confirm('¿Cancelar este gasto?')) return;
+        try { await API.cancelarGasto(b.dataset.cancelar); pintarGastos(filtro); }
+        catch (e) { APP.errorApi(e, 'cancelar gasto'); }
+      });
+    });
+  } catch (e) {
+    APP.errorApi(e, 'listar gastos');
+    cont.innerHTML = '<div class="vacio">No se pudieron cargar los gastos.</div>';
+  }
+}
+
+function etiquetaCatGasto(c) {
+  const mapa = { SUELDOS: 'Sueldos', RENTA: 'Renta', SERVICIOS: 'Servicios', COMBUSTIBLE: 'Combustible',
+    FLETES: 'Fletes', MANTENIMIENTO: 'Mantenimiento', PAPELERIA: 'Papelería', IMPUESTOS: 'Impuestos',
+    OTROS_SERVICIOS: 'Otros servicios', OTROS: 'Otros' };
+  return mapa[c] || c;
+}
+function etiquetaCobro(c) {
+  const mapa = { EFECTIVO: 'Efectivo', TARJETA_CREDITO: 'Tarjeta crédito', TARJETA_DEBITO: 'Tarjeta débito',
+    TRANSFERENCIA: 'Transferencia', CREDITO: 'Crédito', CHEQUE: 'Cheque' };
+  return mapa[c] || c;
+}
+
+function abrirModalGasto(cats) {
+  const fondo = APP.abrirModal(`
+    <div class="modal-caja">
+      <div class="modal-cabecera"><h3>Nuevo gasto</h3><button class="modal-cerrar" id="m-cerrar">&times;</button></div>
+      <div class="modal-cuerpo">
+        <div class="fila-2">
+          <div class="campo"><label for="mg-categoria">Categoría</label><select id="mg-categoria">${cats.CAT_GASTO.map(c => `<option value="${c}">${etiquetaCatGasto(c)}</option>`).join('')}</select></div>
+          <div class="campo"><label for="mg-fecha">Fecha</label><input type="date" id="mg-fecha" value="${hoyISO()}"></div>
+        </div>
+        <div class="campo"><label for="mg-concepto">Concepto</label><input type="text" id="mg-concepto" placeholder="Ej. Pago de luz de julio"></div>
+        <div class="campo"><label for="mg-beneficiario">Beneficiario (opcional)</label><input type="text" id="mg-beneficiario"></div>
+        <div class="fila-2">
+          <div class="campo"><label for="mg-monto">Monto</label><input type="number" id="mg-monto" step="0.01" min="0.01"></div>
+          <div class="campo"><label for="mg-cobro">Forma de pago</label><select id="mg-cobro">${cats.TIPO_COBRO.map(t => `<option value="${t}">${etiquetaCobro(t)}</option>`).join('')}</select></div>
+        </div>
+      </div>
+      <div class="modal-pie">
+        <button class="btn btn-secundario" id="m-cancelar">Cancelar</button>
+        <button class="btn btn-primario" id="m-guardar">Guardar</button>
+      </div>
+    </div>
+  `);
+  fondo.querySelector('#m-cerrar').addEventListener('click', APP.cerrarModal);
+  fondo.querySelector('#m-cancelar').addEventListener('click', APP.cerrarModal);
+  fondo.querySelector('#m-guardar').addEventListener('click', async () => {
+    const concepto = fondo.querySelector('#mg-concepto').value.trim();
+    const monto = fondo.querySelector('#mg-monto').value;
+    if (!concepto) { APP.toast('Escribe el concepto del gasto.', 'error'); return; }
+    if (!monto || Number(monto) <= 0) { APP.toast('Escribe un monto válido.', 'error'); return; }
+
+    const btn = fondo.querySelector('#m-guardar');
+    btn.disabled = true; btn.textContent = 'Guardando...';
+    try {
+      await API.guardarGasto({
+        CATEGORIA: fondo.querySelector('#mg-categoria').value,
+        FECHA: fondo.querySelector('#mg-fecha').value,
+        CONCEPTO: concepto,
+        BENEFICIARIO: fondo.querySelector('#mg-beneficiario').value.trim(),
+        MONTO: monto,
+        TIPO_COBRO: fondo.querySelector('#mg-cobro').value
+      });
+      APP.toast('Gasto registrado.', 'exito');
+      APP.cerrarModal();
+      pintarGastos();
+    } catch (e) {
+      APP.errorApi(e, 'guardar gasto');
+      btn.disabled = false; btn.textContent = 'Guardar';
+    }
+  });
+}
+</script>
+</body>
+</html>
